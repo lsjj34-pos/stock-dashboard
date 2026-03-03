@@ -49,7 +49,8 @@ def load_data(ticker_symbol, period, interval):
             
         # 기본 정보
         info = {}
-        target_sym = ticker_symbol.lower()
+        # yahooquery는 입력한 티커 기호(대소문자 유지)를 딕셔너리 키로 반환합니다.
+        target_sym = ticker_symbol
         detail = ticker.summary_detail.get(target_sym, {}) if isinstance(ticker.summary_detail, dict) else {}
         profile = ticker.asset_profile.get(target_sym, {}) if isinstance(ticker.asset_profile, dict) else {}
         price = ticker.price.get(target_sym, {}) if isinstance(ticker.price, dict) else {}
@@ -67,6 +68,7 @@ def load_data(ticker_symbol, period, interval):
         financials = ticker.income_statement()
         if isinstance(financials, pd.DataFrame):
             if 'asOfDate' in financials.columns:
+                financials = financials.drop_duplicates(subset=['asOfDate'], keep='last')
                 financials = financials.set_index('asOfDate').T
         else:
             financials = None
@@ -74,6 +76,7 @@ def load_data(ticker_symbol, period, interval):
         balance_sheet = ticker.balance_sheet()
         if isinstance(balance_sheet, pd.DataFrame):
             if 'asOfDate' in balance_sheet.columns:
+                balance_sheet = balance_sheet.drop_duplicates(subset=['asOfDate'], keep='last')
                 balance_sheet = balance_sheet.set_index('asOfDate').T
         else:
             balance_sheet = None
@@ -206,8 +209,16 @@ def main():
                 st.metric(label="산업 (Industry)", value=info.get("industry", "N/A"))
             
             with col2:
-                current_price = info.get("currentPrice", info.get("regularMarketPrice", 0))
-                previous_close = info.get("previousClose", 0)
+                # 안전하게 float 형태로 가져옵니다. 값이 None 이거나 숫자가 아니면 0으로 처리합니다.
+                def to_float(val):
+                    try:
+                        return float(val) if val is not None else 0.0
+                    except (ValueError, TypeError):
+                        return 0.0
+
+                current_price = to_float(info.get("currentPrice", info.get("regularMarketPrice", 0)))
+                previous_close = to_float(info.get("previousClose", 0))
+                
                 change = current_price - previous_close
                 change_pct = (change / previous_close * 100) if previous_close else 0
                 
