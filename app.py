@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+from yahooquery import Ticker
 import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
@@ -33,13 +33,51 @@ def load_data(ticker_symbol, period, interval):
     yfinance를 통해 주가 데이터와 재무제표 데이터를 수집합니다.
     """
     try:
-        # yfinance가 내부적으로 curl_cffi 세션을 관리하도록 session 파라미터는 건드리지 않습니다.
-        ticker = yf.Ticker(ticker_symbol)
-        hist = ticker.history(period=period, interval=interval)
-        info = ticker.info
-        financials = ticker.financials
-        balance_sheet = ticker.balance_sheet
+        ticker = Ticker(ticker_symbol)
         
+        # 주가 역사 데이터
+        hist = ticker.history(period=period, interval=interval)
+        if isinstance(hist, pd.DataFrame):
+            hist = hist.reset_index()
+            if 'date' in hist.columns:
+                hist.set_index('date', inplace=True)
+            elif 'Date' in hist.columns:
+                hist.set_index('Date', inplace=True)
+            hist.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+        else:
+            hist = None
+            
+        # 기본 정보
+        info = {}
+        target_sym = ticker_symbol.lower()
+        detail = ticker.summary_detail.get(target_sym, {}) if isinstance(ticker.summary_detail, dict) else {}
+        profile = ticker.asset_profile.get(target_sym, {}) if isinstance(ticker.asset_profile, dict) else {}
+        price = ticker.price.get(target_sym, {}) if isinstance(ticker.price, dict) else {}
+        
+        info['shortName'] = price.get('shortName')
+        info['longName'] = price.get('longName')
+        info['industry'] = profile.get('industry')
+        info['sector'] = profile.get('sector')
+        info['currentPrice'] = price.get('regularMarketPrice')
+        info['previousClose'] = detail.get('previousClose')
+        info['marketCap'] = detail.get('marketCap')
+        info['trailingPE'] = detail.get('trailingPE')
+        
+        # 재무제표 (Transposed for display)
+        financials = ticker.income_statement()
+        if isinstance(financials, pd.DataFrame):
+            if 'asOfDate' in financials.columns:
+                financials = financials.set_index('asOfDate').T
+        else:
+            financials = None
+
+        balance_sheet = ticker.balance_sheet()
+        if isinstance(balance_sheet, pd.DataFrame):
+            if 'asOfDate' in balance_sheet.columns:
+                balance_sheet = balance_sheet.set_index('asOfDate').T
+        else:
+            balance_sheet = None
+            
         return hist, info, financials, balance_sheet
     except Exception as e:
         st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
@@ -222,30 +260,30 @@ def main():
                 if financials is not None and not financials.empty:
                     # 손익계산서 한글 번역 매핑
                     fin_translation = {
-                        "Total Revenue": "총 매출",
-                        "Operating Revenue": "영업 수익",
-                        "Cost Of Revenue": "매출 원가",
-                        "Gross Profit": "매출 총이익",
-                        "Operating Expense": "영업 비용",
-                        "Operating Income": "영업 이익",
-                        "Net Income": "순이익",
-                        "Net Income Common Stockholders": "보통주 순이익",
-                        "Basic EPS": "기본 주당순이익(EPS)",
-                        "Diluted EPS": "희석 주당순이익",
+                        "TotalRevenue": "총 매출",
+                        "OperatingRevenue": "영업 수익",
+                        "CostOfRevenue": "매출 원가",
+                        "GrossProfit": "매출 총이익",
+                        "OperatingExpense": "영업 비용",
+                        "OperatingIncome": "영업 이익",
+                        "NetIncome": "순이익",
+                        "NetIncomeCommonStockholders": "보통주 순이익",
+                        "BasicEPS": "기본 주당순이익(EPS)",
+                        "DilutedEPS": "희석 주당순이익",
                         "EBITDA": "상각전 영업이익(EBITDA)",
-                        "Research And Development": "연구개발비",
-                        "Selling General And Administration": "판매비와 관리비",
-                        "Tax Provision": "법인세 비용",
-                        "Pretax Income": "세전 이익",
-                        "Interest Expense": "이자 비용",
-                        "Interest Income": "이자 수익",
-                        "Net Non Operating Interest Income Expense": "영업외 순이자 손익",
-                        "Other Income Expense": "기타 손익",
+                        "ResearchAndDevelopment": "연구개발비",
+                        "SellingGeneralAndAdministration": "판매비와 관리비",
+                        "TaxProvision": "법인세 비용",
+                        "PretaxIncome": "세전 이익",
+                        "InterestExpense": "이자 비용",
+                        "InterestIncome": "이자 수익",
+                        "NetNonOperatingInterestIncomeExpense": "영업외 순이자 손익",
+                        "OtherIncomeExpense": "기타 손익",
                         "EBIT": "영업이익(EBIT)",
-                        "Reconciled Cost Of Revenue": "조정 매출 원가",
-                        "Reconciled Depreciation": "조정 감가상각비",
-                        "Net Income From Continuing Operation Net Minority Interest": "소수주주지분 제외 계속영업순이익",
-                        "Normalized Income": "정상 순이익"
+                        "ReconciledCostOfRevenue": "조정 매출 원가",
+                        "ReconciledDepreciation": "조정 감가상각비",
+                        "NetIncomeFromContinuingOperationNetMinorityInterest": "소수주주지분 제외 계속영업순이익",
+                        "NormalizedIncome": "정상 순이익"
                     }
                     fin_translated = financials.rename(index=fin_translation)
                     st.dataframe(fin_translated, use_container_width=True)
@@ -256,18 +294,18 @@ def main():
                 if balance_sheet is not None and not balance_sheet.empty:
                     # 대차대조표 한글 번역 매핑
                     bs_translation = {
-                        "Total Assets": "자산 총계",
-                        "Current Assets": "유동 자산",
-                        "Cash And Cash Equivalents": "현금 및 현금성 자산",
+                        "TotalAssets": "자산 총계",
+                        "CurrentAssets": "유동 자산",
+                        "CashAndCashEquivalents": "현금 및 현금성 자산",
                         "Inventory": "재고자산",
-                        "Total Liabilities Net Minority Interest": "부채 총계",
-                        "Current Liabilities": "유동 부채",
-                        "Total Equity Gross Minority Interest": "자본 총계",
-                        "Stockholders Equity": "주주 자본",
-                        "Retained Earnings": "이익잉여금",
-                        "Working Capital": "운전자본",
-                        "Total Debt": "총 부채",
-                        "Net Debt": "순 부채"
+                        "TotalLiabilitiesNetMinorityInterest": "부채 총계",
+                        "CurrentLiabilities": "유동 부채",
+                        "TotalEquityGrossMinorityInterest": "자본 총계",
+                        "StockholdersEquity": "주주 자본",
+                        "RetainedEarnings": "이익잉여금",
+                        "WorkingCapital": "운전자본",
+                        "TotalDebt": "총 부채",
+                        "NetDebt": "순 부채"
                     }
                     bs_translated = balance_sheet.rename(index=bs_translation)
                     st.dataframe(bs_translated, use_container_width=True)
