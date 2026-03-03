@@ -33,13 +33,8 @@ def load_data(ticker_symbol, period, interval):
     yfinance를 통해 주가 데이터와 재무제표 데이터를 수집합니다.
     """
     try:
-        # Too Many Requests 방지를 위한 브라우저 User-Agent 설정
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
-        
-        ticker = yf.Ticker(ticker_symbol, session=session)
+        # yfinance가 내부적으로 curl_cffi 세션을 관리하도록 session 파라미터는 건드리지 않습니다.
+        ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period=period, interval=interval)
         info = ticker.info
         financials = ticker.financials
