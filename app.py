@@ -27,20 +27,28 @@ def get_exchange_rate():
         # 스크래핑 실패 시 대략적인 기본값 반환
         return 1300.0
 
+@st.cache_data(ttl=3600)
 def load_data(ticker_symbol, period, interval):
     """
     yfinance를 통해 주가 데이터와 재무제표 데이터를 수집합니다.
     """
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        # Too Many Requests 방지를 위한 브라우저 User-Agent 설정
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        
+        ticker = yf.Ticker(ticker_symbol, session=session)
         hist = ticker.history(period=period, interval=interval)
         info = ticker.info
         financials = ticker.financials
         balance_sheet = ticker.balance_sheet
-        return ticker, hist, info, financials, balance_sheet
+        
+        return hist, info, financials, balance_sheet
     except Exception as e:
         st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
-        return None, None, None, None, None
+        return None, None, None, None
 
 def plot_candlestick(hist):
     """
@@ -146,7 +154,7 @@ def main():
     api_key = st.sidebar.text_input("Gemini API Key", type="password", help="AI 분석 기능을 사용하기 위해 필요합니다.")
     
     if submit_button and ticker_symbol:
-        ticker, hist, info, financials, balance_sheet = load_data(ticker_symbol, period, interval)
+        hist, info, financials, balance_sheet = load_data(ticker_symbol, period, interval)
         
         if info is not None:
             # Section 1: 회사 개요
