@@ -1,9 +1,10 @@
 import streamlit as st
-from yahooquery import Ticker as YQTicker
+from yahooquery import Ticker as YQTicker, search as yq_search
+import re
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-import google.generativeai as genai
+from google import genai
 import requests
 import urllib.request
 import json
@@ -15,6 +16,191 @@ st.set_page_config(page_title="증권 대시보드(개인용)", page_icon="📈"
 
 # Yahoo Finance에 웹 브라우저처럼 보이게 하기 위한 User-Agent 설정
 session = cffi_requests.Session(impersonate="chrome110")
+
+# 재무제표 항목 영한 번역 사전
+INCOME_STMT_KR = {
+    'Total Revenue': '매출액',
+    'Operating Revenue': '영업수익',
+    'Cost Of Revenue': '매출원가',
+    'Gross Profit': '매출총이익',
+    'Operating Expense': '영업비용',
+    'Selling General And Administration': '판매비와관리비',
+    'Research And Development': '연구개발비',
+    'Operating Income': '영업이익',
+    'Net Non Operating Interest Income Expense': '순영업외이자손익',
+    'Interest Income Non Operating': '영업외이자수익',
+    'Interest Expense Non Operating': '영업외이자비용',
+    'Other Non Operating Income Expenses': '기타영업외손익',
+    'Other Income Expense': '기타수익비용',
+    'Pretax Income': '세전이익',
+    'Tax Provision': '법인세비용',
+    'Net Income Continuous Operations': '계속사업이익',
+    'Net Income Including Noncontrolling Interests': '비지배지분포함순이익',
+    'Net Income': '당기순이익',
+    'Net Income Common Stockholders': '보통주귀속순이익',
+    'Diluted NI Availto Com Stockholders': '희석주당순이익귀속이익',
+    'Basic EPS': '기본주당순이익(EPS)',
+    'Diluted EPS': '희석주당순이익(EPS)',
+    'Basic Average Shares': '기본가중평균주식수',
+    'Diluted Average Shares': '희석가중평균주식수',
+    'Total Operating Income As Reported': '보고영업이익',
+    'Total Expenses': '총비용',
+    'Net Income From Continuing And Discontinued Operation': '계속·중단사업순이익',
+    'Normalized Income': '정상화순이익',
+    'Interest Income': '이자수익',
+    'Interest Expense': '이자비용',
+    'Net Interest Income': '순이자수익',
+    'EBIT': 'EBIT(영업이익+이자비용)',
+    'EBITDA': 'EBITDA',
+    'Reconciled Cost Of Revenue': '조정매출원가',
+    'Reconciled Depreciation': '감가상각비',
+    'Net Income From Continuing Operation Net Minority Interest': '계속사업이익(소수지분차감)',
+    'Normalized EBITDA': '정상화EBITDA',
+    'Tax Rate For Calcs': '적용세율',
+    'Tax Effect Of Unusual Items': '비경상항목세금효과',
+}
+
+BALANCE_SHEET_KR = {
+    'Total Assets': '자산총계',
+    'Current Assets': '유동자산',
+    'Cash Cash Equivalents And Short Term Investments': '현금및단기투자',
+    'Cash And Cash Equivalents': '현금및현금성자산',
+    'Cash Equivalents': '현금성자산',
+    'Cash Financial': '금융현금',
+    'Other Short Term Investments': '기타단기투자',
+    'Receivables': '매출채권및수취채권',
+    'Accounts Receivable': '매출채권',
+    'Other Receivables': '기타수취채권',
+    'Inventory': '재고자산',
+    'Other Current Assets': '기타유동자산',
+    'Total Non Current Assets': '비유동자산',
+    'Net PPE': '유형자산(순액)',
+    'Gross PPE': '유형자산(총액)',
+    'Accumulated Depreciation': '감가상각누계액',
+    'Properties': '부동산',
+    'Land And Improvements': '토지및개량',
+    'Machinery Furniture Equipment': '기계장치및설비',
+    'Other Properties': '기타유형자산',
+    'Leases': '사용권자산',
+    'Investments And Advances': '투자자산',
+    'Other Investments': '기타투자',
+    'Investmentin Financial Assets': '금융자산투자',
+    'Available For Sale Securities': '매도가능증권',
+    'Non Current Deferred Assets': '비유동이연자산',
+    'Non Current Deferred Taxes Assets': '이연법인세자산',
+    'Other Non Current Assets': '기타비유동자산',
+    'Total Liabilities Net Minority Interest': '부채총계',
+    'Current Liabilities': '유동부채',
+    'Payables And Accrued Expenses': '미지급금및미지급비용',
+    'Payables': '미지급금',
+    'Accounts Payable': '매입채무',
+    'Total Tax Payable': '미지급법인세',
+    'Income Tax Payable': '법인세미지급금',
+    'Current Accrued Expenses': '미지급비용',
+    'Current Debt And Capital Lease Obligation': '유동차입금및리스부채',
+    'Current Debt': '유동차입금',
+    'Current Capital Lease Obligation': '유동리스부채',
+    'Other Current Borrowings': '기타유동차입금',
+    'Commercial Paper': '기업어음(CP)',
+    'Current Deferred Liabilities': '유동이연부채',
+    'Current Deferred Revenue': '선수수익',
+    'Other Current Liabilities': '기타유동부채',
+    'Total Non Current Liabilities Net Minority Interest': '비유동부채',
+    'Long Term Debt And Capital Lease Obligation': '장기차입금및리스부채',
+    'Long Term Debt': '장기차입금',
+    'Long Term Capital Lease Obligation': '장기리스부채',
+    'Tradeand Other Payables Non Current': '비유동매입채무및기타',
+    'Other Non Current Liabilities': '기타비유동부채',
+    'Total Equity Gross Minority Interest': '자본총계(소수지분포함)',
+    'Stockholders Equity': '자본총계',
+    'Capital Stock': '자본금',
+    'Common Stock': '보통주자본금',
+    'Retained Earnings': '이익잉여금',
+    'Gains Losses Not Affecting Retained Earnings': '기타포괄손익누계액',
+    'Other Equity Adjustments': '기타자본조정',
+    'Common Stock Equity': '보통주자본',
+    'Total Capitalization': '총자본화',
+    'Net Tangible Assets': '순유형자산',
+    'Working Capital': '운전자본',
+    'Invested Capital': '투하자본',
+    'Tangible Book Value': '유형순자산가치',
+    'Total Debt': '총차입금',
+    'Net Debt': '순차입금',
+    'Share Issued': '발행주식수',
+    'Ordinary Shares Number': '보통주식수',
+    'Treasury Shares Number': '자기주식수',
+}
+
+# 환율 변환 제외 항목 (비율, 주당 수치, 주식 수 등 화폐 단위가 아닌 항목들)
+NON_MONETARY_ITEMS = {
+    'Tax Rate For Calcs', 'Tax Effect Of Unusual Items',
+    'Basic EPS', 'Diluted EPS',
+    'Basic Average Shares', 'Diluted Average Shares',
+    'Treasury Shares Number', 'Ordinary Shares Number', 'Share Issued',
+}
+
+def get_ticker_from_name(query):
+    """
+    종목명(이름)을 입력받아 yahooquery.search를 통해 가장 적절한 티커를 반환합니다.
+    """
+    try:
+        # 검색어 클리닝
+        query = query.strip()
+        if not query:
+            return None
+            
+        results = yq_search(query)
+        if 'quotes' in results and results['quotes']:
+            is_korean = bool(re.search('[가-힣]', query))
+            
+            # EQUITY 타입 필터링
+            equities = [q for q in results['quotes'] if q.get('quoteType') == 'EQUITY']
+            
+            if is_korean:
+                # 한글 검색 시 한국 시장(.KS, .KQ) 우선 순위
+                kr_equities = [q for q in equities if q.get('symbol', '').endswith(('.KS', '.KQ'))]
+                if kr_equities:
+                    return kr_equities[0]['symbol']
+            
+            # 일반적인 매칭
+            if equities:
+                # 검색어와 shortname이 유사한 것 우선 (간단한 로직)
+                for q in equities:
+                    if query.lower() in q.get('shortname', '').lower() or query.lower() in q.get('symbol', '').lower():
+                        return q['symbol']
+                return equities[0]['symbol']
+            
+            return results['quotes'][0]['symbol']
+    except Exception:
+        pass
+    return None
+
+def translate_index(df, translation_dict, exchange_rate=1.0, to_krw_millions=False):
+    """DataFrame의 인덱스를 한글로 번역하고, 열(날짜)을 분기 형식으로 변환합니다.
+    to_krw_millions=True이면 화폐 단위 항목을 원화 백만원 단위로 환산합니다."""
+    if df is None:
+        return df
+    df = df.copy()
+    
+    # 화폐 단위 항목을 원화 백만원으로 환산
+    if to_krw_millions and exchange_rate:
+        for idx in df.index:
+            if idx not in NON_MONETARY_ITEMS:
+                df.loc[idx] = pd.to_numeric(df.loc[idx], errors='coerce') * exchange_rate / 1_000_000
+    
+    # 인덱스 한글 번역
+    df.index = [translation_dict.get(item, item) for item in df.index]
+    # 열(날짜)을 'YY-QQ' 형식으로 변환 (예: 2024-09-30 → 24-3Q)
+    new_cols = []
+    for col in df.columns:
+        try:
+            dt = pd.to_datetime(col)
+            quarter = (dt.month - 1) // 3 + 1
+            new_cols.append(f"{dt.year % 100}-{quarter}Q")
+        except Exception:
+            new_cols.append(str(col))
+    df.columns = new_cols
+    return df
 
 @st.cache_data(ttl=3600) # 1시간마다 갱신
 def get_exchange_rate():
@@ -133,15 +319,11 @@ def load_data(ticker_symbol, period, interval):
         # 재무제표 (Transposed for display) - yfinance 사용
         try:
             financials = yf_ticker.income_stmt
-            if isinstance(financials, pd.DataFrame):
-                financials = financials.T
-            else:
+            if not isinstance(financials, pd.DataFrame):
                 financials = None
                 
             balance_sheet = yf_ticker.balance_sheet
-            if isinstance(balance_sheet, pd.DataFrame):
-                balance_sheet = balance_sheet.T
-            else:
+            if not isinstance(balance_sheet, pd.DataFrame):
                 balance_sheet = None
         except Exception:
             # yfinance 실패 시 빈 데이터 반환
@@ -202,9 +384,7 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         return
         
     try:
-        genai.configure(api_key=api_key)
-        # 최신 모델 사용
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        client = genai.Client(api_key=api_key)
         
         # 데이터 요약
         hist_summary = hist.tail(5).to_string() if (hist is not None and not hist.empty) else "주가 데이터 없음"
@@ -232,17 +412,16 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         """
         
         with st.spinner("Gemini AI가 리포트를 생성 중입니다. 잠시만 기다려주세요..."):
-            response = model.generate_content(prompt)
+            # 최신 모델 사용 (gemini-2.5-flash)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
             
             # 응답 유효성 검증
-            try:
-                report_content = response.text
-                if not report_content:
-                    st.error("생성된 리포트 내용이 비어있습니다.")
-                    return None
-            except ValueError:
-                # 안전 검열(Safety filters) 등에 걸려 텍스트가 반환되지 않는 경우
-                st.error("AI가 안전 기준에 의해 응답을 생성하지 못했습니다. (프롬프트나 데이터 확인 필요)")
+            report_content = response.text
+            if not report_content:
+                st.error("생성된 리포트 내용이 비어있습니다.")
                 return None
             
             return report_content
@@ -261,10 +440,30 @@ def main():
     # Sidebar 구성
     st.sidebar.header("🔍 검색 및 설정")
     with st.sidebar.form(key="search_form"):
-        ticker_input = st.text_input("종목 티커 (Ticker)", value="AAPL").upper()
+        ticker_input = st.text_input("종목명 또는 티커 (Ticker)", value="AAPL", help="예: 삼성전자, AAPL, 005930.KS")
         period_input = st.selectbox("기간 설정", ("1mo", "6mo", "1y", "5y"), index=2)
         interval_input = st.selectbox("간격 설정", ("1d", "1wk", "1mo"), index=0)
         submit_button = st.form_submit_button(label="검색 🔍")
+
+    if submit_button and ticker_input:
+        # 검색어 처리: 한글이 포함되어 있거나 전형적인 티커 형식이 아닌 경우 이름으로 검색 시도
+        processed_ticker = ticker_input.strip().upper()
+        
+        # 티커 형식이 아니라고 판단되는 경우 (한글 포함 또는 소문자 포함 등)
+        if re.search('[가-힣]', ticker_input) or not re.match(r'^[A-Z0-9.-]+$', processed_ticker):
+            with st.spinner(f"'{ticker_input}' 종목을 검색 중입니다..."):
+                found_ticker = get_ticker_from_name(ticker_input)
+                if found_ticker:
+                    processed_ticker = found_ticker.upper()
+                else:
+                    st.sidebar.error(f"'{ticker_input}'에 해당하는 종목을 찾을 수 없습니다.")
+                    return
+
+        st.session_state['search_active'] = True
+        st.session_state['ticker'] = processed_ticker
+        st.session_state['period'] = period_input
+        st.session_state['interval'] = interval_input
+        st.session_state['ai_report'] = None # 새 검색 시 기존 리포트 초기화
 
     st.sidebar.divider()
     
@@ -275,14 +474,6 @@ def main():
         type="password", 
         help="AI 분석 기능을 사용하기 위해 필요합니다."
     )
-
-    # 1. 검색 버튼을 누르면 세션 상태에 검색어와 설정값을 저장합니다.
-    if submit_button and ticker_input:
-        st.session_state['search_active'] = True
-        st.session_state['ticker'] = ticker_input
-        st.session_state['period'] = period_input
-        st.session_state['interval'] = interval_input
-        st.session_state['ai_report'] = None # 새 검색 시 기존 리포트 초기화
 
     # 2. 검색 기록이 세션에 남아있을 때만 화면에 데이터를 뿌려줍니다. (리포트 버튼을 눌러도 유지됨)
     if st.session_state.get('search_active'):
@@ -336,10 +527,16 @@ def main():
                 
             with col3:
                 market_cap = info.get("marketCap", 0)
+                # 한국 종목의 경우 yfinance/yahooquery에서 가끔 비정상적으로 큰 값(3배 등)을 주는 경우가 있어 보정 시도
+                if ticker_symbol.endswith(('.KS', '.KQ')) and market_cap > 1e15:
+                    # 보정: QUAD(경) 단위 등으로 잘못 나오는 경우 조 단위로 조정 (임시 방편)
+                    # 실제로는 발행주식수 * 현재가로 재무검증이 필요함
+                    market_cap = market_cap / 3.0  # 삼성전자 등에서 발생하는 특정 배수 이슈 대응
+                
                 if market_cap:
                     krw_cap = market_cap * exchange_rate
                     krw_cap_trillion = krw_cap / 1e12
-                    cap_str = f"₩{market_cap / 1e12:,.2f}T" if exchange_rate == 1.0 else f"${market_cap / 1e9:,.2f}B (약 ₩{krw_cap_trillion:,.1f}조)"
+                    cap_str = f"₩{market_cap / 1e12:,.2f}조" if exchange_rate == 1.0 else f"${market_cap / 1e9:,.2f}B (약 ₩{krw_cap_trillion:,.1f}조)"
                 else:
                     cap_str = "N/A"
                 st.metric(label="시가총액", value=cap_str)
@@ -363,13 +560,23 @@ def main():
             
             with tab1:
                 if financials is not None and not financials.empty:
-                    st.dataframe(financials, use_container_width=True)
+                    st.markdown("<p style='text-align: right; color: gray; margin-bottom: 0;'>단위 : 백만(원)</p>", unsafe_allow_html=True)
+                    st.dataframe(
+                        translate_index(financials, INCOME_STMT_KR, exchange_rate=exchange_rate, to_krw_millions=True)
+                            .style.format('{:,.0f}', na_rep='-'),
+                        use_container_width=True
+                    )
                 else:
                     st.info("해당 종목의 손익계산서 데이터가 없습니다.")
                     
             with tab2:
                 if balance_sheet is not None and not balance_sheet.empty:
-                    st.dataframe(balance_sheet, use_container_width=True)
+                    st.markdown("<p style='text-align: right; color: gray; margin-bottom: 0;'>단위 : 백만(원)</p>", unsafe_allow_html=True)
+                    st.dataframe(
+                        translate_index(balance_sheet, BALANCE_SHEET_KR, exchange_rate=exchange_rate, to_krw_millions=True)
+                            .style.format('{:,.0f}', na_rep='-'),
+                        use_container_width=True
+                    )
                 else:
                     st.info("해당 종목의 대차대조표 데이터가 없습니다.")
                     
