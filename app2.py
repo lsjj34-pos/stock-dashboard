@@ -204,7 +204,7 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
     try:
         genai.configure(api_key=api_key)
         # 최신 모델 사용
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         
         # 데이터 요약
         hist_summary = hist.tail(5).to_string() if (hist is not None and not hist.empty) else "주가 데이터 없음"
