@@ -51,9 +51,13 @@ def load_data(ticker_symbol, period, interval):
         info = {}
         # yahooquery는 입력한 티커 기호(대소문자 유지)를 딕셔너리 키로 반환합니다.
         target_sym = ticker_symbol
-        detail = ticker.summary_detail.get(target_sym, {}) if isinstance(ticker.summary_detail, dict) else {}
-        profile = ticker.asset_profile.get(target_sym, {}) if isinstance(ticker.asset_profile, dict) else {}
-        price = ticker.price.get(target_sym, {}) if isinstance(ticker.price, dict) else {}
+        detail_res = ticker.summary_detail
+        profile_res = ticker.asset_profile
+        price_res = ticker.price
+        
+        detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
+        profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
+        price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
         
         info['shortName'] = price.get('shortName')
         info['longName'] = price.get('longName')
