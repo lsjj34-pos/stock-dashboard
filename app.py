@@ -1,5 +1,6 @@
 import streamlit as st
-from yahooquery import Ticker
+from yahooquery import Ticker as YQTicker
+import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
@@ -33,10 +34,11 @@ def load_data(ticker_symbol, period, interval):
     yfinance를 통해 주가 데이터와 재무제표 데이터를 수집합니다.
     """
     try:
-        ticker = Ticker(ticker_symbol)
+        # yfinance로부터 역사 주가 먼저 가져오기 (yahooquery보다 안정적일 때가 많음)
+        yf_ticker = yf.Ticker(ticker_symbol)
         
         # 주가 역사 데이터
-        hist = ticker.history(period=period, interval=interval)
+        hist = yf_ticker.history(period=period, interval=interval)
         if isinstance(hist, pd.DataFrame):
             hist = hist.reset_index()
             if 'date' in hist.columns:
@@ -47,52 +49,70 @@ def load_data(ticker_symbol, period, interval):
         else:
             hist = None
             
-        # 기본 정보
+        # 기본 정보 - 우선 yfinance (안정적) 시도, 없으면 yahooquery로 보완
         info = {}
-        # yahooquery는 입력한 티커 기호(대소문자 유지)를 딕셔너리 키로 반환합니다.
-        target_sym = ticker_symbol
-        detail_res = ticker.summary_detail
-        profile_res = ticker.asset_profile
-        price_res = ticker.price
-        
-        # 만약 API 응답이 에러 문자열 형태라면, 해당 에러를 표시하고 데이터를 반환하지 않음
-        if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), str):
-            raise ValueError(f"Yahoo Finance API 에러: {price_res.get(target_sym)}")
-        if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), str):
-            raise ValueError(f"Yahoo Finance API 에러: {detail_res.get(target_sym)}")
+        try:
+            yf_info = yf_ticker.info
+            info['shortName'] = yf_info.get('shortName')
+            info['longName'] = yf_info.get('longName')
+            info['industry'] = yf_info.get('industry')
+            info['sector'] = yf_info.get('sector')
+            info['currentPrice'] = yf_info.get('currentPrice', yf_info.get('regularMarketPrice'))
+            info['previousClose'] = yf_info.get('previousClose')
+            info['marketCap'] = yf_info.get('marketCap')
+            info['trailingPE'] = yf_info.get('trailingPE')
             
-        detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
-        profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
-        price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
+            # yfinance에서 찾지 못한 필수 정보가 있다면 yahooquery 호출
+            if not info['currentPrice']:
+                raise ValueError("yfinance failed to fetch current price")
+        except Exception:
+            # yfinance가 실패했을 때 yahooquery로 폴백 (Fallback)
+            yq_ticker = YQTicker(ticker_symbol)
+            target_sym = ticker_symbol
+            detail_res = yq_ticker.summary_detail
+            profile_res = yq_ticker.asset_profile
+            price_res = yq_ticker.price
+            
+            # 만약 API 응답이 에러 문자열 형태라면, 해당 에러를 표시하고 데이터를 반환하지 않음
+            if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), str):
+                raise ValueError(f"Yahoo Finance API 에러: {price_res.get(target_sym)}")
+            if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), str):
+                raise ValueError(f"Yahoo Finance API 에러: {detail_res.get(target_sym)}")
+                
+            detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
+            profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
+            price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
+            
+            # 완전 빈 데이터라면 잘못된 티커일 수 있음
+            if not detail and not profile and not price:
+                raise ValueError("해당 티커에 대한 재무/주가 데이터를 찾을 수 없습니다.")
+            
+            info['shortName'] = price.get('shortName')
+            info['longName'] = price.get('longName')
+            info['industry'] = profile.get('industry')
+            info['sector'] = profile.get('sector')
+            info['currentPrice'] = price.get('regularMarketPrice')
+            info['previousClose'] = detail.get('previousClose')
+            info['marketCap'] = detail.get('marketCap')
+            info['trailingPE'] = detail.get('trailingPE')
         
-        # 완전 빈 데이터라면 잘못된 티커일 수 있음
-        if not detail and not profile and not price:
-            raise ValueError("해당 티커에 대한 재무/주가 데이터를 찾을 수 없습니다.")
         
-        info['shortName'] = price.get('shortName')
-        info['longName'] = price.get('longName')
-        info['industry'] = profile.get('industry')
-        info['sector'] = profile.get('sector')
-        info['currentPrice'] = price.get('regularMarketPrice')
-        info['previousClose'] = detail.get('previousClose')
-        info['marketCap'] = detail.get('marketCap')
-        info['trailingPE'] = detail.get('trailingPE')
-        
-        # 재무제표 (Transposed for display)
-        financials = ticker.income_statement()
-        if isinstance(financials, pd.DataFrame):
-            if 'asOfDate' in financials.columns:
-                financials = financials.drop_duplicates(subset=['asOfDate'], keep='last')
-                financials = financials.set_index('asOfDate').T
-        else:
+        # 재무제표 (Transposed for display) - yfinance 사용
+        try:
+            financials = yf_ticker.income_stmt
+            if isinstance(financials, pd.DataFrame):
+                financials = financials.T
+            else:
+                financials = None
+                
+            balance_sheet = yf_ticker.balance_sheet
+            if isinstance(balance_sheet, pd.DataFrame):
+                balance_sheet = balance_sheet.T
+            else:
+                balance_sheet = None
+        except Exception:
+            # yfinance 실패 시 빈 데이터 반환
             financials = None
-
-        balance_sheet = ticker.balance_sheet()
-        if isinstance(balance_sheet, pd.DataFrame):
-            if 'asOfDate' in balance_sheet.columns:
-                balance_sheet = balance_sheet.drop_duplicates(subset=['asOfDate'], keep='last')
-                balance_sheet = balance_sheet.set_index('asOfDate').T
-        else:
             balance_sheet = None
             
         return hist, info, financials, balance_sheet
