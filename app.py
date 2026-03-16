@@ -378,7 +378,7 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         with st.spinner("Gemini AI가 리포트를 생성 중입니다. 잠시만 기다려주세요..."):
             # 최신 모델 사용 (gemini-2.5-flash)
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             
