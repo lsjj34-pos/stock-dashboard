@@ -11,7 +11,7 @@ from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
 # Streamlit 페이지 설정
-st.set_page_config(page_title="정준전용 AI 증권 대시보드", page_icon="📈", layout="wide")
+st.set_page_config(page_title="증권 대시보드(개인용)", page_icon="📈", layout="wide")
 
 # Yahoo Finance에 웹 브라우저처럼 보이게 하기 위한 User-Agent 설정
 session = cffi_requests.Session(impersonate="chrome110")
@@ -254,7 +254,7 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         return None
 
 def main():
-    st.title("📈 실시간 금융 데이터 & AI 분석 대시보드")
+    st.title("📈 정준's AI증권 대시보드")
     st.markdown("티커를 검색하여 주가 차트, 재무제표를 확인하고 Gemini AI의 분석 리포트를 받아보세요.")
     st.divider()
 
@@ -451,7 +451,7 @@ def main():
                     with st.expander("리포트 결과 보기", expanded=True):
                         st.markdown(current_report)
             else:
-                st.info("👈 사이드바에 Gemini API Key를 입력하시면, AI가 작성한 심층 분석 리포트를 받아보실 수 있습니다.")
+                st.info("👈 Gemini API Key")
 
 if __name__ == "__main__":
     main()
