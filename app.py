@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
 import requests
+import urllib.request
+import json
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
@@ -103,9 +105,30 @@ def load_data(ticker_symbol, period, interval):
                 info['previousClose'] = detail.get('previousClose')
                 info['marketCap'] = detail.get('marketCap')
                 info['trailingPE'] = detail.get('trailingPE')
+                
+                # yahooquery에서도 현재가를 가져오지 못했다면 최후의 수단으로 직접 API 호츌
+                if not info.get('currentPrice'):
+                    raise ValueError("yahooquery failed to fetch current price")
             except Exception as e_yq:
-                # 둘 다 완전히 실패했을 경우 두 에러를 모두 표시
-                raise ValueError(f"데이터를 가져올 수 없습니다. IP Rate Limit 혹은 일시적 차단 상태입니다.\n(yfinance 에러: {str(e_yf)} / yahooquery 에러: {str(e_yq)})")
+                # 둘 다 완전히 실패했을 경우, 세 번째 최후의 수단 (직접 Request)
+                try:
+                    url = f'https://query2.finance.yahoo.com/v8/finance/chart/{ticker_symbol}'
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req) as response:
+                        chart_data = json.loads(response.read().decode())
+                        result = chart_data.get('chart', {}).get('result', [])
+                        if result:
+                            meta = result[0].get('meta', {})
+                            info['currentPrice'] = meta.get('regularMarketPrice')
+                            info['previousClose'] = meta.get('chartPreviousClose')
+                            info['shortName'] = ticker_symbol
+                            
+                            if not info.get('currentPrice'):
+                                raise ValueError("직접 호출로도 가격을 가져오지 못했습니다.")
+                        else:
+                            raise ValueError("차트 API 결과가 비어있습니다.")
+                except Exception as e_direct:
+                    raise ValueError(f"데이터를 가져올 수 없습니다. IP Rate Limit 혹은 일시적 차단 상태입니다.\n(yfinance: {str(e_yf)} / yahooquery: {str(e_yq)} / direct: {str(e_direct)})")
         
         # 재무제표 (Transposed for display) - yfinance 사용
         try:
