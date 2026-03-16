@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # Streamlit 페이지 설정
-st.set_page_config(page_title="AI 증권 대시보드", page_icon="📈", layout="wide")
+st.set_page_config(page_title="정준전용 AI 증권 대시보드", page_icon="📈", layout="wide")
 
 @st.cache_data(ttl=3600) # 1시간마다 갱신
 def get_exchange_rate():
@@ -203,7 +203,20 @@ def main():
                 # 한국 주식일 경우 환율 적용 안함 (yfinance에서 KRW로 반환될 가능성 높음)
                 exchange_rate = 1.0
             
-            col1, col2, col3, col4 = st.columns(4)
+            # 메트릭 값이 길어질 때 잘리지 않도록 텍스트 줄바꿈 허용 CSS 추가
+            st.markdown("""
+                <style>
+                [data-testid="stMetricValue"] {
+                    white-space: normal;
+                    word-break: keep-all;
+                    font-size: 1.6rem;
+                    line-height: 1.2;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+            
+            # 넓은 영역을 확보하기 위해 4열에서 2열 2행 구조로 변경
+            col1, col2 = st.columns(2)
             
             with col1:
                 st.metric(label="산업 (Industry)", value=info.get("industry", "N/A"))
@@ -234,6 +247,9 @@ def main():
                     value=f"{currency_symbol}{current_price:,.2f}{krw_str}", 
                     delta=f"{change:,.2f} ({change_pct:.2f}%)"
                 )
+            
+            st.write("") # 상하 여백 추가
+            col3, col4 = st.columns(2)
                 
             with col3:
                 market_cap = info.get("marketCap", 0)
