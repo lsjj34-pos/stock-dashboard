@@ -5,10 +5,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
 import requests
+from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
 # Streamlit 페이지 설정
 st.set_page_config(page_title="정준전용 AI 증권 대시보드", page_icon="📈", layout="wide")
+
+# Yahoo Finance에 웹 브라우저처럼 보이게 하기 위한 User-Agent 설정
+session = cffi_requests.Session(impersonate="chrome110")
 
 @st.cache_data(ttl=3600) # 1시간마다 갱신
 def get_exchange_rate():
@@ -35,7 +39,7 @@ def load_data(ticker_symbol, period, interval):
     """
     try:
         # yfinance로부터 역사 주가 먼저 가져오기 (yahooquery보다 안정적일 때가 많음)
-        yf_ticker = yf.Ticker(ticker_symbol)
+        yf_ticker = yf.Ticker(ticker_symbol, session=session)
         
         # 주가 역사 데이터
         hist = yf_ticker.history(period=period, interval=interval)
@@ -65,37 +69,43 @@ def load_data(ticker_symbol, period, interval):
             # yfinance에서 찾지 못한 필수 정보가 있다면 yahooquery 호출
             if not info['currentPrice']:
                 raise ValueError("yfinance failed to fetch current price")
-        except Exception:
+        except Exception as e_yf:
             # yfinance가 실패했을 때 yahooquery로 폴백 (Fallback)
-            yq_ticker = YQTicker(ticker_symbol)
-            target_sym = ticker_symbol
-            detail_res = yq_ticker.summary_detail
-            profile_res = yq_ticker.asset_profile
-            price_res = yq_ticker.price
-            
-            # 만약 API 응답이 에러 문자열 형태라면, 해당 에러를 표시하고 데이터를 반환하지 않음
-            if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), str):
-                raise ValueError(f"Yahoo Finance API 에러: {price_res.get(target_sym)}")
-            if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), str):
-                raise ValueError(f"Yahoo Finance API 에러: {detail_res.get(target_sym)}")
+            try:
+                yq_ticker = YQTicker(ticker_symbol, asynchronous=False)
+                target_sym = ticker_symbol
+                detail_res = yq_ticker.summary_detail
+                profile_res = yq_ticker.asset_profile
+                price_res = yq_ticker.price
                 
-            detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
-            profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
-            price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
-            
-            # 완전 빈 데이터라면 잘못된 티커일 수 있음
-            if not detail and not profile and not price:
-                raise ValueError("해당 티커에 대한 재무/주가 데이터를 찾을 수 없습니다.")
-            
-            info['shortName'] = price.get('shortName')
-            info['longName'] = price.get('longName')
-            info['industry'] = profile.get('industry')
-            info['sector'] = profile.get('sector')
-            info['currentPrice'] = price.get('regularMarketPrice')
-            info['previousClose'] = detail.get('previousClose')
-            info['marketCap'] = detail.get('marketCap')
-            info['trailingPE'] = detail.get('trailingPE')
-        
+                # 만약 API 응답이 에러 문자열 형태라면
+                if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), str):
+                    err_msg = price_res.get(target_sym)
+                    if "Crumb" in err_msg or "Rate" in err_msg:
+                        raise ValueError(f"Yahoo Server Blocked (Rate Limit or Crumb): {err_msg}")
+                    raise ValueError(f"Yahoo Finance API 에러: {err_msg}")
+                if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), str):
+                    raise ValueError(f"Yahoo Finance API 에러: {detail_res.get(target_sym)}")
+                    
+                detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
+                profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
+                price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
+                
+                # 완전 빈 데이터라면 잘못된 티커일 수 있음
+                if not detail and not profile and not price:
+                    raise ValueError("해당 티커에 대한 재무/주가 데이터를 찾을 수 없습니다.")
+                
+                info['shortName'] = price.get('shortName')
+                info['longName'] = price.get('longName')
+                info['industry'] = profile.get('industry')
+                info['sector'] = profile.get('sector')
+                info['currentPrice'] = price.get('regularMarketPrice')
+                info['previousClose'] = detail.get('previousClose')
+                info['marketCap'] = detail.get('marketCap')
+                info['trailingPE'] = detail.get('trailingPE')
+            except Exception as e_yq:
+                # 둘 다 완전히 실패했을 경우 두 에러를 모두 표시
+                raise ValueError(f"데이터를 가져올 수 없습니다. IP Rate Limit 혹은 일시적 차단 상태입니다.\n(yfinance 에러: {str(e_yf)} / yahooquery 에러: {str(e_yq)})")
         
         # 재무제표 (Transposed for display) - yfinance 사용
         try:

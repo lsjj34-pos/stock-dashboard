@@ -6,3 +6,4 @@ google-generativeai
 requests
 beautifulsoup4
 yfinance
+curl_cffi
