@@ -185,7 +185,9 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
             return report_content
             
     except Exception as e:
-        st.error(f"AI 리포트 생성 중 오류가 발생했습니다: {e}")
+        # 오류가 발생했을 때 사용자에게 명확히 보일 수 있도록 구체적인 에러 메시지 출력
+        st.error(f"❌ AI 리포트 생성 실패: {str(e)}")
+        st.info("API Key가 정확한지, 혹은 할당량(Quota)을 초과하지 않았는지 확인해 주세요.")
         return None
 
 def main():
