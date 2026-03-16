@@ -55,9 +55,19 @@ def load_data(ticker_symbol, period, interval):
         profile_res = ticker.asset_profile
         price_res = ticker.price
         
+        # 만약 API 응답이 에러 문자열 형태라면, 해당 에러를 표시하고 데이터를 반환하지 않음
+        if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), str):
+            raise ValueError(f"Yahoo Finance API 에러: {price_res.get(target_sym)}")
+        if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), str):
+            raise ValueError(f"Yahoo Finance API 에러: {detail_res.get(target_sym)}")
+            
         detail = detail_res.get(target_sym, {}) if isinstance(detail_res, dict) and isinstance(detail_res.get(target_sym), dict) else {}
         profile = profile_res.get(target_sym, {}) if isinstance(profile_res, dict) and isinstance(profile_res.get(target_sym), dict) else {}
         price = price_res.get(target_sym, {}) if isinstance(price_res, dict) and isinstance(price_res.get(target_sym), dict) else {}
+        
+        # 완전 빈 데이터라면 잘못된 티커일 수 있음
+        if not detail and not profile and not price:
+            raise ValueError("해당 티커에 대한 재무/주가 데이터를 찾을 수 없습니다.")
         
         info['shortName'] = price.get('shortName')
         info['longName'] = price.get('longName')
