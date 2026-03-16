@@ -269,7 +269,13 @@ def main():
     st.sidebar.divider()
     
     st.sidebar.header("🤖 AI 분석 설정")
-    api_key = st.sidebar.text_input("Gemini API Key", type="password", help="AI 분석 기능을 사용하기 위해 필요합니다.")
+    # 사용자가 제공한 API 키를 기본값으로 하드코딩
+    api_key = st.sidebar.text_input(
+        "Gemini API Key", 
+        value="AIzaSyCWdwS0Y7lA3UTkCcpJxC-_ckC1q-uACv0", 
+        type="password", 
+        help="AI 분석 기능을 사용하기 위해 필요합니다."
+    )
     
     if submit_button and ticker_symbol:
         hist, info, financials, balance_sheet = load_data(ticker_symbol, period, interval)
@@ -431,15 +437,19 @@ def main():
             # Section 4: Gemini AI 분석 (API 키 입력 시 활성화)
             st.subheader("🤖 Gemini 종합 분석 리포트")
             if api_key:
+                # AI 리포트 생성 버튼
                 if st.button("AI 리포트 생성하기", type="primary"):
                     report = generate_ai_report(api_key, ticker_symbol, info, hist, financials)
-                    if report:
+                    if report is not None:
                         st.session_state['ai_report'] = report
+                    else:
+                        st.session_state['ai_report'] = "생성실패" # 명시적 상태 추가
                 
                 # 생성된 리포트가 세션 상태에 존재하면 화면에 출력
-                if st.session_state.get('ai_report'):
+                current_report = st.session_state.get('ai_report')
+                if current_report and current_report != "생성실패":
                     with st.expander("리포트 결과 보기", expanded=True):
-                        st.markdown(st.session_state['ai_report'])
+                        st.markdown(current_report)
             else:
                 st.info("👈 사이드바에 Gemini API Key를 입력하시면, AI가 작성한 심층 분석 리포트를 받아보실 수 있습니다.")
 
