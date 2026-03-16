@@ -166,10 +166,23 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         
         with st.spinner("Gemini AI가 리포트를 생성 중입니다. 잠시만 기다려주세요..."):
             response = model.generate_content(prompt)
-            st.markdown(response.text)
+            
+            # 응답 유효성 검증
+            try:
+                report_content = response.text
+                if not report_content:
+                    st.error("생성된 리포트 내용이 비어있습니다.")
+                    return None
+            except ValueError:
+                # 안전 검열(Safety filters) 등에 걸려 텍스트가 반환되지 않는 경우
+                st.error("AI가 안전 기준에 의해 응답을 생성하지 못했습니다. (프롬프트나 데이터 확인 필요)")
+                return None
+            
+            return report_content
             
     except Exception as e:
         st.error(f"AI 리포트 생성 중 오류가 발생했습니다: {e}")
+        return None
 
 def main():
     st.title("📈 실시간 금융 데이터 & AI 분석 대시보드")
@@ -341,11 +354,23 @@ def main():
                     
             st.divider()
             
+            # 종목이 변경되었을 때 이전 리포트를 초기화
+            if 'current_ticker' not in st.session_state or st.session_state['current_ticker'] != ticker_symbol:
+                st.session_state['current_ticker'] = ticker_symbol
+                st.session_state['ai_report'] = None
+                
             # Section 4: Gemini AI 분석 (API 키 입력 시 활성화)
             st.subheader("🤖 Gemini 종합 분석 리포트")
             if api_key:
                 if st.button("AI 리포트 생성하기", type="primary"):
-                    generate_ai_report(api_key, ticker_symbol, info, hist, financials)
+                    report = generate_ai_report(api_key, ticker_symbol, info, hist, financials)
+                    if report:
+                        st.session_state['ai_report'] = report
+                
+                # 생성된 리포트가 세션 상태에 존재하면 화면에 출력
+                if st.session_state.get('ai_report'):
+                    with st.expander("리포트 결과 보기", expanded=True):
+                        st.markdown(st.session_state['ai_report'])
             else:
                 st.info("👈 사이드바에 Gemini API Key를 입력하시면, AI가 작성한 심층 분석 리포트를 받아보실 수 있습니다.")
 
