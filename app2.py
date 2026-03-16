@@ -1,6 +1,5 @@
 import streamlit as st
-from yahooquery import Ticker as YQTicker, search as yq_search
-import re
+from yahooquery import Ticker as YQTicker
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
@@ -139,41 +138,6 @@ NON_MONETARY_ITEMS = {
     'Treasury Shares Number', 'Ordinary Shares Number', 'Share Issued',
 }
 
-def get_ticker_from_name(query):
-    """
-    종목명(이름)을 입력받아 yahooquery.search를 통해 가장 적절한 티커를 반환합니다.
-    """
-    try:
-        # 검색어 클리닝
-        query = query.strip()
-        if not query:
-            return None
-            
-        results = yq_search(query)
-        if 'quotes' in results and results['quotes']:
-            is_korean = bool(re.search('[가-힣]', query))
-            
-            # EQUITY 타입 필터링
-            equities = [q for q in results['quotes'] if q.get('quoteType') == 'EQUITY']
-            
-            if is_korean:
-                # 한글 검색 시 한국 시장(.KS, .KQ) 우선 순위
-                kr_equities = [q for q in equities if q.get('symbol', '').endswith(('.KS', '.KQ'))]
-                if kr_equities:
-                    return kr_equities[0]['symbol']
-            
-            # 일반적인 매칭
-            if equities:
-                # 검색어와 shortname이 유사한 것 우선 (간단한 로직)
-                for q in equities:
-                    if query.lower() in q.get('shortname', '').lower() or query.lower() in q.get('symbol', '').lower():
-                        return q['symbol']
-                return equities[0]['symbol']
-            
-            return results['quotes'][0]['symbol']
-    except Exception:
-        pass
-    return None
 
 def translate_index(df, translation_dict, exchange_rate=1.0, to_krw_millions=False):
     """DataFrame의 인덱스를 한글로 번역하고, 열(날짜)을 분기 형식으로 변환합니다.
@@ -440,27 +404,14 @@ def main():
     # Sidebar 구성
     st.sidebar.header("🔍 검색 및 설정")
     with st.sidebar.form(key="search_form"):
-        ticker_input = st.text_input("종목명 또는 티커 (Ticker)", value="AAPL", help="예: 삼성전자, AAPL, 005930.KS")
+        ticker_input = st.text_input("종목 티커 (Ticker)", value="AAPL").upper()
         period_input = st.selectbox("기간 설정", ("1mo", "6mo", "1y", "5y"), index=2)
         interval_input = st.selectbox("간격 설정", ("1d", "1wk", "1mo"), index=0)
         submit_button = st.form_submit_button(label="검색 🔍")
 
     if submit_button and ticker_input:
-        # 검색어 처리: 한글이 포함되어 있거나 전형적인 티커 형식이 아닌 경우 이름으로 검색 시도
-        processed_ticker = ticker_input.strip().upper()
-        
-        # 티커 형식이 아니라고 판단되는 경우 (한글 포함 또는 소문자 포함 등)
-        if re.search('[가-힣]', ticker_input) or not re.match(r'^[A-Z0-9.-]+$', processed_ticker):
-            with st.spinner(f"'{ticker_input}' 종목을 검색 중입니다..."):
-                found_ticker = get_ticker_from_name(ticker_input)
-                if found_ticker:
-                    processed_ticker = found_ticker.upper()
-                else:
-                    st.sidebar.error(f"'{ticker_input}'에 해당하는 종목을 찾을 수 없습니다.")
-                    return
-
         st.session_state['search_active'] = True
-        st.session_state['ticker'] = processed_ticker
+        st.session_state['ticker'] = ticker_input
         st.session_state['period'] = period_input
         st.session_state['interval'] = interval_input
         st.session_state['ai_report'] = None # 새 검색 시 기존 리포트 초기화
@@ -527,12 +478,6 @@ def main():
                 
             with col3:
                 market_cap = info.get("marketCap", 0)
-                # 한국 종목의 경우 yfinance/yahooquery에서 가끔 비정상적으로 큰 값(3배 등)을 주는 경우가 있어 보정 시도
-                if ticker_symbol.endswith(('.KS', '.KQ')) and market_cap > 1e15:
-                    # 보정: QUAD(경) 단위 등으로 잘못 나오는 경우 조 단위로 조정 (임시 방편)
-                    # 실제로는 발행주식수 * 현재가로 재무검증이 필요함
-                    market_cap = market_cap / 3.0  # 삼성전자 등에서 발생하는 특정 배수 이슈 대응
-                
                 if market_cap:
                     krw_cap = market_cap * exchange_rate
                     krw_cap_trillion = krw_cap / 1e12
