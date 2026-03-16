@@ -378,7 +378,7 @@ def generate_ai_report(api_key, ticker_symbol, info, hist, financials):
         with st.spinner("Gemini AI가 리포트를 생성 중입니다. 잠시만 기다려주세요..."):
             # 최신 모델 사용 (gemini-2.5-flash)
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-2.0-flash',
                 contents=prompt
             )
             
@@ -400,6 +400,11 @@ def main():
     st.title("📈 정준's AI증권 대시보드")
     st.markdown("티커를 검색하여 주가 차트, 재무제표를 확인하고 Gemini AI의 분석 리포트를 받아보세요.")
     st.divider()
+
+    if 'search_active' not in st.session_state:
+        st.session_state['search_active'] = False
+    if 'ai_report' not in st.session_state:
+        st.session_state['ai_report'] = None
 
     # Sidebar 구성
     st.sidebar.header("🔍 검색 및 설정")
